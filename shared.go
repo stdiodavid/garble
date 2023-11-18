@@ -154,6 +154,9 @@ type listedPackage struct {
 	CompiledGoFiles []string
 	IgnoredGoFiles  []string
 	Imports         []string
+	Module          struct {
+		Main bool // true if is a package from the project (not an external dep)
+	}
 
 	Error *packageError // to report package loading errors to the user
 

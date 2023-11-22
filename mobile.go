@@ -3,7 +3,6 @@ package main
 import (
 	"errors"
 	"fmt"
-	"golang.org/x/exp/slices"
 	"io"
 	"os"
 	"os/exec"
@@ -125,5 +124,9 @@ func prependToPath(dir string) error {
 // When this binary is called as "go" by gomobile, if the command is not in the slice below,
 // we want to exec the real go binary.
 func isPassThroughCommand(cmd string) bool {
-	return !slices.Contains([]string{"build", "toolexec"}, cmd)
+	switch cmd {
+	case "build", "toolexec":
+		return false
+	}
+	return true
 }

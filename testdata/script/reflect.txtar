@@ -24,6 +24,7 @@ import (
 	"crypto/rand"
 	"crypto/x509"
 	"crypto/x509/pkix"
+	"encoding/gob"
 	"encoding/json"
 	"fmt"
 	"math/big"
@@ -292,6 +293,59 @@ func testx509() {
 	}
 }
 
+type pingMsg struct {
+	Data string `sshtype:"192"`
+}
+
+type pongMsg struct {
+	Data string `sshtype:"193"`
+}
+
+// golang.org/x/crypto/ssh converts a reflected type to another type
+func testSSH() {
+	var msg = pingMsg{
+		Data: "data",
+	}
+	json.Marshal(msg)
+
+	_ = pongMsg(msg)
+}
+
+// variations similar to ssh
+type reflectedMsg struct {
+	Data string
+}
+
+type convertedMsg struct {
+	Data string
+}
+
+func reflectConvert() {
+	msg := reflectedMsg(convertedMsg{})
+	json.Marshal(msg)
+}
+
+type reflectedMsg2 struct {
+	Data string
+}
+
+type convertedMsg2 struct {
+	Data string
+}
+
+func unrelatedConvert() {
+	// only discoverable by rechecking the package
+	_ = convertedMsg2(reflectedMsg2{})
+}
+
+func reflectUnrelatedConv() {
+	var msg = reflectedMsg2{
+		Data: "data",
+	}
+	json.Marshal(msg)
+
+}
+
 
 type StatUser struct {
 	Id      int64 `gorm:"primaryKey"`
@@ -355,6 +409,58 @@ type UnnamedStructFields struct {
 		mu           sync.Mutex
 		extensionMap map[int32]EncodingT
 	}
+}
+
+func gobStruct() {
+	type gobAlias struct {
+		Security []map[string]struct {
+			List []string
+			Pad  bool
+		}
+	}
+	alias := gobAlias{}
+
+	gob.NewEncoder(os.Stdout).Encode(alias)
+
+	alias.Security = make([]map[string]struct {
+		List []string
+		Pad  bool
+	}, 0, len([]string{}))
+}
+
+func gobMap() {
+	type gobAlias struct {
+		Security map[string]struct {
+			List []string
+			Pad  bool
+		}
+	}
+	alias := gobAlias{}
+
+	gob.NewEncoder(os.Stdout).Encode(alias)
+
+	alias.Security = make(map[string]struct {
+		List []string
+		Pad  bool
+	}, len([]string{}))
+}
+
+func gobChan() {
+	type gobAlias struct {
+		Security chan struct {
+			List []string
+			Pad  bool
+		}
+	}
+
+	alias := gobAlias{}
+
+	gob.NewEncoder(os.Stdout).Encode(alias)
+
+	alias.Security = make(chan struct {
+		List []string
+		Pad  bool
+	}, len([]string{}))
 }
 
 -- importedpkg/imported.go --

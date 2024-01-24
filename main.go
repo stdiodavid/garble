@@ -1,6 +1,7 @@
 // Copyright (c) 2019, The Garble Authors.
 // See LICENSE for licensing information.
 
+// garble obfuscates Go code by wrapping the Go toolchain.
 package main
 
 import (
@@ -736,14 +737,24 @@ func (tf *transformer) transformAsm(args []string) ([]string, error) {
 		for scanner.Scan() {
 			line := scanner.Text()
 
-			// First, handle hash directives without leading whitespaces.
+			// Whole-line comments might be directives, leave them in place.
+			// For example: //go:build race
+			// Any other comment, including inline ones, can be discarded entirely.
+			line, comment, hasComment := strings.Cut(line, "//")
+			if hasComment && line == "" {
+				buf.WriteString("//")
+				buf.WriteString(comment)
+				buf.WriteByte('\n')
+				continue
+			}
 
-			// #include "foo.h"
+			// Preprocessor lines to include another file.
+			// For example: #include "foo.h"
 			if quoted := strings.TrimPrefix(line, "#include"); quoted != line {
 				quoted = strings.TrimSpace(quoted)
 				path, err := strconv.Unquote(quoted)
-				if err != nil {
-					return nil, err
+				if err != nil { // note that strconv.Unquote errors do not include the input string
+					return nil, fmt.Errorf("cannot unquote %q: %v", quoted, err)
 				}
 				newPath := newHeaderPaths[path]
 				switch newPath {
@@ -782,16 +793,8 @@ func (tf *transformer) transformAsm(args []string) ([]string, error) {
 				continue
 			}
 
-			// Leave "//" comments unchanged; they might be directives.
-			line, comment, hasComment := strings.Cut(line, "//")
-
 			// Anything else is regular assembly; replace the names.
 			tf.replaceAsmNames(&buf, []byte(line))
-
-			if hasComment {
-				buf.WriteString("//")
-				buf.WriteString(comment)
-			}
 			buf.WriteByte('\n')
 		}
 		if err := scanner.Err(); err != nil {
@@ -1591,10 +1594,10 @@ func computePkgCache(fsCache *cache.Cache, lpkg *listedPackage, pkg *types.Packa
 
 	// Fill the reflect info from SSA, which builds on top of the syntax tree and type info.
 	inspector := reflectInspector{
-		pkg:              pkg,
-		checkedAPIs:      make(map[string]bool),
-		propagatedStores: map[*ssa.Store]bool{},
-		result:           computed, // append the results
+		pkg:             pkg,
+		checkedAPIs:     make(map[string]bool),
+		propagatedInstr: map[ssa.Instruction]bool{},
+		result:          computed, // append the results
 	}
 	if ssaPkg == nil {
 		ssaPkg = ssaBuildPkg(pkg, files, info)

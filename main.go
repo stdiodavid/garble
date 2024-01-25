@@ -59,6 +59,7 @@ var (
 	flagSeed     seedFlag
 	// TODO(pagran): in the future, when control flow obfuscation will be stable migrate to flag
 	flagControlFlow = os.Getenv("GARBLE_EXPERIMENTAL_CONTROLFLOW") == "1"
+	flagMobile      bool
 )
 
 func init() {
@@ -68,6 +69,7 @@ func init() {
 	flagSet.BoolVar(&flagDebug, "debug", false, "Print debug logs to stderr")
 	flagSet.StringVar(&flagDebugDir, "debugdir", "", "Write the obfuscated source to a directory, e.g. -debugdir=out")
 	flagSet.Var(&flagSeed, "seed", "Provide a base64-encoded seed, e.g. -seed=o9WDTZ4CN4w\nFor a random seed, provide -seed=random")
+	flagSet.BoolVar(&flagMobile, "mobile", false, "Use gomobile with 'bind' to create a mobile library")
 }
 
 var rxGarbleFlag = regexp.MustCompile(`-(?:literals|tiny|debug|debugdir|seed)(?:$|=)`)
@@ -84,6 +86,7 @@ func (f seedFlag) String() string {
 }
 
 func (f *seedFlag) Set(s string) error {
+
 	if s == "random" {
 		f.random = true // to show the random seed we chose
 
@@ -231,8 +234,18 @@ func main1() int {
 	if err := flagSet.Parse(os.Args[1:]); err != nil {
 		return 2
 	}
+
 	log.SetPrefix("[garble] ")
 	log.SetFlags(0) // no timestamps, as they aren't very useful
+
+	// Flags are saved to env before using gomobile.
+	// If not compiling for mobile, this is a noop.
+	err := loadFlagsFromEnv()
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "failed to parse flags from env. flags from env: %s", os.Getenv(flagsEnvVar))
+		return 1
+	}
+
 	if flagDebug {
 		// TODO: cover this in the tests.
 		log.SetOutput(&uniqueLineWriter{out: os.Stderr})
@@ -445,7 +458,13 @@ func mainErr(args []string) error {
 		// ensure gomobile is found in PATH
 		_, err := exec.LookPath("gomobile")
 		if err != nil {
-			return errors.New("gomobile not found in PATH")
+			return errors.New("gomobile not found in PATH. See https://pkg.go.dev/golang.org/x/mobile/cmd/gomobile for installation instructions.")
+		}
+
+		// ensure gobind is found in PATH
+		_, err = exec.LookPath("gobind")
+		if err != nil {
+			return errors.New("gobind not found in PATH. See https://pkg.go.dev/golang.org/x/mobile/cmd/gomobile for installation instructions.")
 		}
 
 		binDir, err := copyGarbleToTempDirAsGo()
@@ -467,6 +486,11 @@ func mainErr(args []string) error {
 		err = prependToPath(binDir)
 		if err != nil {
 			return fmt.Errorf("unable to modify PATH env var: %w", err)
+		}
+
+		err = saveFlagsToEnv()
+		if err != nil {
+			return errors.New("failed to save flags to env")
 		}
 
 		cmd := exec.Command("gomobile", args...)

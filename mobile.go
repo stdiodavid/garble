@@ -1,6 +1,8 @@
 package main
 
 import (
+	"encoding/base64"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
@@ -13,6 +15,81 @@ import (
 
 // The path to the real go binary is stored under this key in environment
 const garbleOgGo = "GARBLE_OG_GO"
+
+// Original flags the user passed when calling garble are stored as json under this key in environment
+const flagsEnvVar = "GARBLE_FLAGS"
+
+// We need to preserve the original flags the user passed if they are using gomobile.
+// gomobile will call this binary as 'go' therefore it will not pass the flags that the user passed.
+func saveFlagsToEnv() error {
+	flags := newFlagsForEnv()
+	data, err := json.Marshal(flags)
+	if err != nil {
+		return err
+	}
+	return os.Setenv(flagsEnvVar, string(data))
+}
+
+func loadFlagsFromEnv() error {
+	envFlagJson := os.Getenv(flagsEnvVar)
+	if envFlagJson == "" {
+		return nil
+	}
+
+	var envFlags flagsForEnv
+	err := json.Unmarshal([]byte(envFlagJson), &envFlags)
+	if err != nil {
+		return err
+	}
+
+	var seed seedFlag
+	if len(envFlags.Seed) > 0 {
+		var b []byte
+		b, err = base64.RawStdEncoding.DecodeString(envFlags.Seed)
+		if err != nil {
+			return err
+		}
+		seed.bytes = b
+	}
+
+	flagLiterals = envFlags.Literals
+	flagTiny = envFlags.Tiny
+	flagDebug = envFlags.Debug
+	flagDebugDir = envFlags.DebugDir
+	flagSeed = seed
+	flagControlFlow = envFlags.ControlFlow
+	flagMobile = envFlags.Mobile
+
+	return nil
+}
+
+type flagsForEnv struct {
+	Literals    bool   `json:"literals"`
+	Tiny        bool   `json:"tiny"`
+	Debug       bool   `json:"debug"`
+	DebugDir    string `json:"debugDir"`
+	Seed        string `json:"seed"`
+	ControlFlow bool   `json:"controlFlow"`
+	Mobile      bool   `json:"mobile"`
+}
+
+func newFlagsForEnv() flagsForEnv {
+	var seed string
+
+	if len(flagSeed.bytes) > 0 {
+		seed = base64.RawStdEncoding.EncodeToString(flagSeed.bytes)
+	}
+
+	return flagsForEnv{
+		Literals:    flagLiterals,
+		Tiny:        flagTiny,
+		Debug:       flagDebug,
+		DebugDir:    flagDebugDir,
+		Seed:        seed,
+		ControlFlow: flagControlFlow,
+		Mobile:      flagMobile,
+	}
+}
 
 // If go mobile calls this binary with a command other than "build" we need to call the real go binary.
 func redirectToOgGo(args []string) int {
@@ -121,7 +198,7 @@ func prependToPath(dir string) error {
 	return os.Setenv("PATH", path)
 }
 
-// When this binary is called as "go" by gomobile, if the command is not in the slice below,
+// When this binary is called as "go" by gomobile, if the command is not one of these commands,
 // we want to exec the real go binary.
 func isPassThroughCommand(cmd string) bool {
 	switch cmd {

@@ -1,5 +1,36 @@
 # Changelog
 
+## [v0.13.0] - 2024-09-05
+
+This release drops support for Go 1.21 and adds support for Go 1.23.
+
+A number of fixes are also included:
+* Fix obfuscation errors when arch-dependent struct padding is used
+* Fix a failure when using garble inside a `go.work` workspace
+* Fail early and clearly if the Go version is too new
+* Rewrite the main `go generate` script from Bash to Go and improve it
+
+## [v0.12.1] - 2024-02-18
+
+This bugfix release fixes a regression in v0.12.0 that broke `x/sys/unix`.
+See #830.
+
+## [v0.12.0] - 2024-02-10
+
+This release continues support for Go 1.21 and includes fixes for Go 1.22,
+now that the final 1.22.0 release is out.
+
+@lu4p improved the detection of types used with reflection to track `make` calls too,
+fixing more `cannot use T1 as T2` errors when obfuscating types. See [#690].
+
+@pagran added a trash block generator to the control flow obfuscator.
+See [#825].
+
+A number of bugfixes are also included:
+* Avoid an error when building for `GOOS=ios` - [#816]
+* Prevent the shuffle literal obfuscation from being optimized away - [#819]
+* Support inline comments in assembly `#include` lines - [#812]
+
 ## [v0.11.0] - 2023-12-02
 
 This release drops support for Go 1.20, continues support for Go 1.21,
@@ -260,6 +291,15 @@ Known bugs:
 
 * obfuscating the standard library with `GOPRIVATE=*` is not well supported yet
 * `garble test` is temporarily disabled, as it is currently broken
+
+[v0.12.1]: https://github.com/burrowers/garble/releases/tag/v0.12.1
+
+[v0.12.0]: https://github.com/burrowers/garble/releases/tag/v0.12.0
+[#690]: https://github.com/burrowers/garble/issues/690
+[#812]: https://github.com/burrowers/garble/issues/812
+[#816]: https://github.com/burrowers/garble/pull/816
+[#819]: https://github.com/burrowers/garble/pull/819
+[#825]: https://github.com/burrowers/garble/pull/825
 
 [v0.11.0]: https://github.com/burrowers/garble/releases/tag/v0.11.0
 [#462]: https://github.com/burrowers/garble/issues/462

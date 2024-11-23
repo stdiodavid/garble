@@ -3,10 +3,10 @@ package main
 import (
 	"fmt"
 	"go/types"
+	"maps"
 	"path/filepath"
+	"slices"
 
-	"golang.org/x/exp/maps"
-	"golang.org/x/exp/slices"
 	"golang.org/x/tools/go/ssa"
 )
 
@@ -30,7 +30,7 @@ func (ri *reflectInspector) recordReflection(ssaPkg *ssa.Package) {
 
 	// find all unchecked APIs to add them to checkedAPIs after the pass
 	notCheckedAPIs := make(map[string]bool)
-	for _, knownAPI := range maps.Keys(ri.result.ReflectAPIs) {
+	for knownAPI := range maps.Keys(ri.result.ReflectAPIs) {
 		if !ri.checkedAPIs[knownAPI] {
 			notCheckedAPIs[knownAPI] = true
 		}
@@ -69,7 +69,7 @@ func (ri *reflectInspector) ignoreReflectedTypes(ssaPkg *ssa.Package) {
 			// so some logic is required to find the methods a type has
 
 			method := func(mset *types.MethodSet) {
-				for i, n := 0, mset.Len(); i < n; i++ {
+				for i := range mset.Len() {
 					at := mset.At(i)
 
 					if m := ssaPkg.Prog.MethodValue(at); m != nil {
@@ -112,7 +112,7 @@ func (ri *reflectInspector) checkMethodSignature(reflectParams map[int]bool, sig
 	}
 
 	params := sig.Params()
-	for i := 0; i < params.Len(); i++ {
+	for i := range params.Len() {
 		if reflectParams[i] {
 			continue
 		}
@@ -404,7 +404,7 @@ func (ri *reflectInspector) recursivelyRecordUsedForReflect(t types.Type) {
 		ri.recursivelyRecordUsedForReflect(t.Underlying())
 
 	case *types.Struct:
-		for i := 0; i < t.NumFields(); i++ {
+		for i := range t.NumFields() {
 			field := t.Field(i)
 
 			// This check is similar to the one in *types.Named.

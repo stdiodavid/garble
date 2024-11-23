@@ -41,7 +41,7 @@ func decodeBuildIDHash(str string) []byte {
 		panic(fmt.Sprintf("invalid hash %q: %v", str, err))
 	}
 	if len(h) != buildIDHashLength {
-		panic(fmt.Sprintf("decodeHash expects to result in a hash of length %d, got %d", buildIDHashLength, len(h)))
+		panic(fmt.Sprintf("decodeBuildIDHash expects to result in a hash of length %d, got %d", buildIDHashLength, len(h)))
 	}
 	return h
 }
@@ -223,7 +223,15 @@ func entryOffKey() uint32 {
 	return runtimeHashWithCustomSalt([]byte("entryOffKey"))
 }
 
-func hashWithPackage(pkg *listedPackage, name string) string {
+func hashWithPackage(tf *transformer, pkg *listedPackage, name string) string {
+
+	// In some places it is not appropriate to access the transformer
+	if tf != nil {
+		// If the package is marked as "in-use" by reflection, the private structures are not obfuscated, so dont return them as a hash. Fixes #882
+		if _, ok := tf.curPkgCache.ReflectObjects[pkg.ImportPath+"."+name]; ok {
+			return name
+		}
+	}
 	// If the user provided us with an obfuscation seed,
 	// we use that with the package import path directly..
 	// Otherwise, we use GarbleActionID as a fallback salt.

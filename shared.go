@@ -14,14 +14,14 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"slices"
 	"strings"
 	"time"
 
 	"golang.org/x/mod/module"
-	"golang.org/x/mod/semver"
 )
 
-//go:generate ./scripts/gen-go-std-tables.sh
+//go:generate go run scripts/gen_go_std_tables.go
 
 // sharedCacheType is shared as a read-only cache between the many garble toolexec
 // sub-processes.
@@ -50,17 +50,18 @@ type sharedCacheType struct {
 
 	GOGARBLE string
 
-	// GoVersionSemver is a semver-compatible version of the Go toolchain
-	// currently being used, as reported by "go env GOVERSION".
+	// GoVersion is a version of the Go toolchain currently being used,
+	// as reported by "go env GOVERSION" and compatible with go/version.
 	// Note that the version of Go that built the garble binary might be newer.
 	// Also note that a devel version like "go1.22-231f290e51" is
-	// currently represented as "v1.22".
-	GoVersionSemver string
+	// currently represented as "go1.22", as the suffix is ignored by go/version.
+	GoVersion string
 
 	// Filled directly from "go env".
 	// Keep in sync with fetchGoEnv.
 	GoEnv struct {
-		GOOS string // i.e. the GOOS build target
+		GOOS   string // the GOOS build target
+		GOARCH string // the GOARCH build target
 
 		GOMOD     string
 		GOVERSION string
@@ -129,9 +130,8 @@ func writeGobExclusive(name string, val any) error {
 	if err != nil {
 		return err
 	}
-	if err := gob.NewEncoder(f).Encode(val); err != nil {
-		return err
-	}
+	// Always close the file, and return the first error we get.
+	err = gob.NewEncoder(f).Encode(val)
 	if err2 := f.Close(); err == nil {
 		err = err2
 	}
@@ -187,17 +187,22 @@ func (p *listedPackage) obfuscatedImportPath() string {
 	//   * runtime: it is special in many ways
 	//   * reflect: its presence turns down dead code elimination
 	//   * embed: its presence enables using //go:embed
+	//   * others like syscall are allowed by import path to have more ABI tricks
+	//
+	// TODO: collect directly from cmd/internal/objabi/pkgspecial.go,
+	// in this particular case from allowAsmABIPkgs.
 	switch p.ImportPath {
-	case "runtime", "reflect", "embed":
+	case "runtime", "reflect", "embed", "syscall", "runtime/internal/startlinetest":
 		return p.ImportPath
 	}
-	if compilerIntrinsicsPkgs[p.ImportPath] {
+	// Intrinsics are matched by package import path as well.
+	if _, ok := compilerIntrinsics[p.ImportPath]; ok {
 		return p.ImportPath
 	}
 	if !p.ToObfuscate {
 		return p.ImportPath
 	}
-	newPath := hashWithPackage(p, p.ImportPath)
+	newPath := hashWithPackage(nil, p, p.ImportPath)
 	log.Printf("import path %q hashed with %x to %q", p.ImportPath, p.GarbleActionID, newPath)
 	return newPath
 }
@@ -231,7 +236,9 @@ func appendListedPackages(packages []string, mainBuild bool) error {
 		// However, when loading standard library packages,
 		// using those flags would likely result in an error,
 		// as the standard library uses its own Go module and vendoring.
-		args = append(args, "-mod=", "-modfile=")
+		args = slices.DeleteFunc(args, func(arg string) bool {
+			return strings.HasPrefix(arg, "-mod=") || strings.HasPrefix(arg, "-modfile=")
+		})
 	}
 
 	args = append(args, packages...)
@@ -265,12 +272,13 @@ func appendListedPackages(packages []string, mainBuild bool) error {
 		}
 
 		if perr := pkg.Error; perr != nil {
-			if pkg.Standard && len(pkg.CompiledGoFiles) == 0 && len(pkg.IgnoredGoFiles) > 0 {
+			if !mainBuild && len(pkg.CompiledGoFiles) == 0 && len(pkg.IgnoredGoFiles) > 0 {
 				// Some packages in runtimeLinknamed need a build tag to be importable,
 				// like crypto/internal/boring/fipstls with boringcrypto,
 				// so any pkg.Error should be ignored when the build tag isn't set.
-			} else if pkg.ImportPath == "math/rand/v2" && semver.Compare(sharedCache.GoVersionSemver, "v1.22") < 0 {
-				// added in Go 1.22, so Go 1.21 runs into a "not found" error.
+			} else if !mainBuild && strings.Contains(perr.Err, "is not in std") {
+				// When we support multiple Go versions at once, some packages may only
+				// exist in the newer version, so we fail to list them with the older.
 			} else {
 				if pkgErrors.Len() > 0 {
 					pkgErrors.WriteString("\n")
@@ -380,7 +388,7 @@ func listPackage(from *listedPackage, path string) (*listedPackage, error) {
 			return pkg, nil
 		}
 		if listedRuntimeLinknamed {
-			panic(fmt.Sprintf("package %q still missing after go list call", path))
+			return nil, fmt.Errorf("package %q still missing after go list call", path)
 		}
 		startTime := time.Now()
 		missing := make([]string, 0, len(runtimeLinknamed))
@@ -398,11 +406,11 @@ func listPackage(from *listedPackage, path string) (*listedPackage, error) {
 		}
 		// We don't need any information about their dependencies, in this case.
 		if err := appendListedPackages(missing, false); err != nil {
-			panic(err) // should never happen
+			return nil, fmt.Errorf("failed to load missing runtime-linknamed packages: %v", err)
 		}
 		pkg, ok := sharedCache.ListedPackages[path]
 		if !ok {
-			panic(fmt.Sprintf("std listed another std package that we can't find: %s", path))
+			return nil, fmt.Errorf("std listed another std package that we can't find: %s", path)
 		}
 		listedRuntimeLinknamed = true
 		log.Printf("listed %d missing runtime-linknamed packages in %s", len(missing), debugSince(startTime))
